@@ -44,7 +44,7 @@ import InsertDataModal, { type InsertDataFormData } from './InsertDataModal';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.flashfirejobs.com';
 
-type BookingStatus = 'scheduled' | 'completed' | 'canceled' | 'rescheduled' | 'no-show';
+type BookingStatus = 'scheduled' | 'completed' | 'canceled' | 'rescheduled' | 'no-show' | 'ignored';
 type DataType = 'booking' | 'user';
 
 interface Booking {
@@ -111,6 +111,7 @@ const statusLabels: Record<BookingStatus, string> = {
   canceled: 'Canceled',
   rescheduled: 'Rescheduled',
   'no-show': 'No Show',
+  ignored: 'Ignored',
 };
 
 const statusColors: Record<BookingStatus, string> = {
@@ -119,6 +120,7 @@ const statusColors: Record<BookingStatus, string> = {
   canceled: 'text-red-600 bg-red-100',
   rescheduled: 'text-amber-600 bg-amber-100',
   'no-show': 'text-rose-600 bg-rose-100',
+  ignored: 'text-gray-600 bg-gray-100',
 };
 
 interface UserCampaign {
@@ -197,7 +199,7 @@ export default function UnifiedDataView({ onOpenEmailCampaign }: UnifiedDataView
   const [selectedUserEmail, setSelectedUserEmail] = useState<string | null>(null);
   const [userCampaignsList, setUserCampaignsList] = useState<UserCampaign[]>([]);
   const [loadingUserCampaigns, setLoadingUserCampaigns] = useState(false);
-  const [loadingCampaignsForEmails, setLoadingCampaignsForEmails] = useState<Set<string>>(new Set());
+  // Removed loadingCampaignsForEmails - campaigns now load on-demand only
   const [isUsersWithoutMeetingsExpanded, setIsUsersWithoutMeetingsExpanded] = useState(false);
   const [isNotesModalOpen, setIsNotesModalOpen] = useState(false);
   const [selectedBookingForNotes, setSelectedBookingForNotes] = useState<{ id: string; name: string; notes: string } | null>(null);
@@ -272,36 +274,7 @@ export default function UnifiedDataView({ onOpenEmailCampaign }: UnifiedDataView
     }
   }, []);
 
-  const fetchUserCampaigns = useCallback(async (emails: string[]) => {
-    try {
-      setLoadingUserCampaigns(true);
-      const loadingSet = new Set<string>(emails.map(e => e.toLowerCase()));
-      setLoadingCampaignsForEmails(loadingSet);
-
-      const campaignsMap = new Map<string, UserCampaign[]>();
-
-      await Promise.all(
-        emails.map(async (email) => {
-          try {
-            const response = await fetch(`${API_BASE_URL}/api/email-campaigns/user/${encodeURIComponent(email)}`);
-            const data = await response.json();
-            if (data.success && data.data) {
-              campaignsMap.set(email.toLowerCase(), data.data);
-            }
-          } catch (err) {
-            console.error(`Failed to fetch campaigns for ${email}:`, err);
-          }
-        })
-      );
-
-      setUserCampaigns(campaignsMap);
-    } catch (err) {
-      console.error('Error fetching user campaigns:', err);
-    } finally {
-      setLoadingUserCampaigns(false);
-      setLoadingCampaignsForEmails(new Set());
-    }
-  }, []);
+  // Removed automatic campaign fetching - now only fetches when "Campaigns" button is clicked
 
   useEffect(() => {
     const cachedBookings = getCachedBookings<Booking>();
@@ -311,41 +284,15 @@ export default function UnifiedDataView({ onOpenEmailCampaign }: UnifiedDataView
       setBookings(cachedBookings);
       setUsersWithoutBookings(cachedUsers);
       setLoading(false);
-      const allEmails = new Set<string>();
-      cachedUsers.forEach(u => {
-        if (u.email) allEmails.add(u.email.toLowerCase());
-      });
-      cachedBookings.forEach(b => {
-        if (b.clientEmail) allEmails.add(b.clientEmail.toLowerCase());
-      });
-      const emailArray = Array.from(allEmails);
-      if (emailArray.length > 0) {
-        fetchUserCampaigns(emailArray);
-      }
       setTimeout(() => {
         fetchData(true).catch(console.error);
       }, 100);
     } else {
       fetchData(false).catch(console.error);
     }
-  }, [fetchData, fetchUserCampaigns]);
+  }, [fetchData]);
 
-  useEffect(() => {
-    const allEmails = new Set<string>();
-
-    usersWithoutBookings.forEach(u => {
-      if (u.email) allEmails.add(u.email.toLowerCase());
-    });
-
-    bookings.forEach(b => {
-      if (b.clientEmail) allEmails.add(b.clientEmail.toLowerCase());
-    });
-
-    const emailArray = Array.from(allEmails);
-    if (emailArray.length > 0) {
-      fetchUserCampaigns(emailArray);
-    }
-  }, [usersWithoutBookings, bookings, fetchUserCampaigns]);
+  // Removed automatic campaign fetching on data changes - saves bandwidth and resources
 
   const unifiedData = useMemo<UnifiedRow[]>(() => {
     const rows: UnifiedRow[] = [];
@@ -563,18 +510,19 @@ export default function UnifiedDataView({ onOpenEmailCampaign }: UnifiedDataView
     setUserCampaignsList([]);
 
     try {
-      const campaigns = userCampaigns.get(userEmail.toLowerCase()) || [];
-      if (campaigns.length > 0) {
-        setUserCampaignsList(campaigns);
+      // Fetch campaigns on-demand when button is clicked
+      const response = await fetch(`${API_BASE_URL}/api/email-campaigns/user/${encodeURIComponent(userEmail)}`);
+      const data = await response.json();
+      if (data.success && data.data) {
+        setUserCampaignsList(data.data);
+        // Store in cache for this session
+        setUserCampaigns(prev => {
+          const newMap = new Map(prev);
+          newMap.set(userEmail.toLowerCase(), data.data);
+          return newMap;
+        });
       } else {
-        // Fetch campaigns if not already loaded
-        const response = await fetch(`${API_BASE_URL}/api/email-campaigns/user/${encodeURIComponent(userEmail)}`);
-        const data = await response.json();
-        if (data.success && data.data) {
-          setUserCampaignsList(data.data);
-        } else {
-          alert('Failed to load campaigns: ' + (data.message || 'Unknown error'));
-        }
+        alert('Failed to load campaigns: ' + (data.message || 'Unknown error'));
       }
     } catch (err) {
       console.error('Error fetching user campaigns:', err);
@@ -582,7 +530,7 @@ export default function UnifiedDataView({ onOpenEmailCampaign }: UnifiedDataView
     } finally {
       setLoadingUserCampaigns(false);
     }
-  }, [userCampaigns]);
+  }, []);
 
   const handleCampaignClick = useCallback(async (campaignId: string, userEmail: string) => {
     setSelectedCampaign({ campaignId, userEmail });
@@ -994,21 +942,7 @@ export default function UnifiedDataView({ onOpenEmailCampaign }: UnifiedDataView
                               <td className="px-4 py-4">
                                 {(() => {
                                   const emailLower = row.email.toLowerCase();
-                                  const isLoading = loadingCampaignsForEmails.has(emailLower);
                                   const campaigns = userCampaigns.get(emailLower) || [];
-
-                                  if (isLoading) {
-                                    return (
-                                      <div className="flex items-center gap-2 text-slate-500">
-                                        <Loader2 className="animate-spin" size={14} />
-                                        <span className="text-xs">Loading...</span>
-                                      </div>
-                                    );
-                                  }
-
-                                  if (campaigns.length === 0) {
-                                    return <span className="text-slate-400 text-xs">No campaigns</span>;
-                                  }
 
                                   return (
                                     <div className="space-y-1 max-w-xs">
@@ -1019,10 +953,10 @@ export default function UnifiedDataView({ onOpenEmailCampaign }: UnifiedDataView
                                       >
                                         <Mail className="text-purple-500" size={14} />
                                         <span className="text-purple-700 font-semibold">
-                                          {campaigns.length} campaign{campaigns.length > 1 ? 's' : ''}
+                                          {campaigns.length > 0 ? `${campaigns.length} campaign${campaigns.length > 1 ? 's' : ''}` : 'View Campaigns'}
                                         </span>
                                         <span className="text-slate-400 ml-auto">
-                                          View all →
+                                          →
                                         </span>
                                       </button>
                                     </div>
@@ -1097,7 +1031,7 @@ export default function UnifiedDataView({ onOpenEmailCampaign }: UnifiedDataView
           className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white"
         >
           <option value="all">All statuses</option>
-          {(['scheduled', 'completed', 'rescheduled', 'no-show', 'canceled'] as BookingStatus[]).map((status) => (
+          {(['scheduled', 'completed', 'rescheduled', 'no-show', 'canceled', 'ignored'] as BookingStatus[]).map((status) => (
             <option key={status} value={status}>
               {statusLabels[status]}
             </option>
@@ -1261,35 +1195,25 @@ export default function UnifiedDataView({ onOpenEmailCampaign }: UnifiedDataView
                       <td className="px-2 py-3">
                         {(() => {
                           const emailLower = row.email.toLowerCase();
-                          const isLoading = loadingCampaignsForEmails.has(emailLower);
                           const campaigns = userCampaigns.get(emailLower) || [];
                           const booking = isBooking && row.bookingId ? bookingsById.get(row.bookingId) : null;
 
                           return (
                             <div className="space-y-2 max-w-xs">
                               {/* Email Campaigns */}
-                              {isLoading ? (
-                                <div className="flex items-center gap-2 text-slate-500">
-                                  <Loader2 className="animate-spin" size={14} />
-                                  <span className="text-xs">Loading...</span>
-                                </div>
-                              ) : campaigns.length > 0 ? (
-                                <button
-                                  onClick={() => handleUserCampaignsClick(row.email)}
-                                  className="flex items-center gap-2 text-xs hover:bg-slate-50 rounded px-2 py-1 transition cursor-pointer w-full text-left border border-slate-200 hover:border-orange-300"
-                                  type="button"
-                                >
-                                  <Mail className="text-orange-500" size={14} />
-                                  <span className="text-slate-700 font-semibold">
-                                    {campaigns.length} campaign{campaigns.length > 1 ? 's' : ''}
-                                  </span>
-                                  <span className="text-slate-400 ml-auto">
-                                    View all →
-                                  </span>
-                                </button>
-                              ) : (
-                                <span className="text-slate-400 text-xs">No campaigns</span>
-                              )}
+                              <button
+                                onClick={() => handleUserCampaignsClick(row.email)}
+                                className="flex items-center gap-2 text-xs hover:bg-slate-50 rounded px-2 py-1 transition cursor-pointer w-full text-left border border-slate-200 hover:border-orange-300"
+                                type="button"
+                              >
+                                <Mail className="text-orange-500" size={14} />
+                                <span className="text-slate-700 font-semibold">
+                                  {campaigns.length > 0 ? `${campaigns.length} campaign${campaigns.length > 1 ? 's' : ''}` : 'View Campaigns'}
+                                </span>
+                                <span className="text-slate-400 ml-auto">
+                                  →
+                                </span>
+                              </button>
 
                               {/* Scheduled Information */}
                               {booking && (
@@ -1473,6 +1397,7 @@ export default function UnifiedDataView({ onOpenEmailCampaign }: UnifiedDataView
                                   <option value="no-show">No Show</option>
                                   <option value="rescheduled">Rescheduled</option>
                                   <option value="canceled">Canceled</option>
+                                  <option value="ignored">Ignored</option>
                                 </select>
                               </div>
                             </div>

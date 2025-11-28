@@ -85,6 +85,8 @@ export default function EmailCampaign({ prefill, onPrefillConsumed }: EmailCampa
   const [resendingEmails, setResendingEmails] = useState<string[]>([]);
   const [togglingStatus, setTogglingStatus] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'create' | 'scheduled' | 'history'>('create');
+  const [selectedBookingStatus, setSelectedBookingStatus] = useState<string>('scheduled');
+  const [fetchingEmails, setFetchingEmails] = useState(false);
 
   useEffect(() => {
     fetchCampaigns();
@@ -155,6 +157,32 @@ export default function EmailCampaign({ prefill, onPrefillConsumed }: EmailCampa
 
   const handleLoadMore = () => {
     fetchCampaigns(page + 1);
+  };
+
+  const handleGetEmailsByStatus = async () => {
+    setFetchingEmails(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/campaign-bookings?status=${selectedBookingStatus}`);
+      const data = await response.json();
+
+      if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+        // Extract unique emails from bookings
+        const uniqueEmails = Array.from(new Set(data.data.map((booking: any) => booking.clientEmail).filter(Boolean)));
+        const emailsString = uniqueEmails.join(', ');
+        setEmailIds(emailsString);
+        setSuccess(`Found ${uniqueEmails.length} unique emails for status "${selectedBookingStatus}"`);
+      } else {
+        setError(`No emails found for status "${selectedBookingStatus}"`);
+      }
+    } catch (err) {
+      console.error('Error fetching emails by status:', err);
+      setError('Failed to fetch emails. Please try again.');
+    } finally {
+      setFetchingEmails(false);
+    }
   };
 
   const handleGetEmails = async () => {
@@ -507,6 +535,68 @@ export default function EmailCampaign({ prefill, onPrefillConsumed }: EmailCampa
                 <label htmlFor="emailIds" className="block text-sm font-semibold text-gray-700 mb-2">
                   Email IDs (Recipients)
                 </label>
+                
+                {/* Booking Status Filter */}
+                <div className="mb-3 flex items-center gap-3 bg-gradient-to-r from-orange-50 to-purple-50 p-4 rounded-lg border border-orange-200">
+                  <div className="flex-1">
+                    <label htmlFor="bookingStatus" className="block text-xs font-semibold text-gray-700 mb-2">
+                      Get Emails by Booking Status
+                    </label>
+                    <select
+                      id="bookingStatus"
+                      value={selectedBookingStatus}
+                      onChange={async (e) => {
+                        setSelectedBookingStatus(e.target.value);
+                        setFetchingEmails(true);
+                        setError('');
+                        setSuccess('');
+                        try {
+                          const response = await fetch(`${API_BASE_URL}/api/campaign-bookings?status=${e.target.value}`);
+                          const data = await response.json();
+                          if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+                            const uniqueEmails = Array.from(new Set(data.data.map((booking: any) => booking.clientEmail).filter(Boolean)));
+                            const emailsString = uniqueEmails.join(', ');
+                            setEmailIds(emailsString);
+                            setSuccess(`Found ${uniqueEmails.length} unique emails for status "${e.target.value}"`);
+                          } else {
+                            setError(`No emails found for status "${e.target.value}"`);
+                          }
+                        } catch (err) {
+                          console.error('Error fetching emails by status:', err);
+                          setError('Failed to fetch emails. Please try again.');
+                        } finally {
+                          setFetchingEmails(false);
+                        }
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-all text-sm"
+                    >
+                      <option value="scheduled">Scheduled</option>
+                      <option value="completed">Completed</option>
+                      <option value="no-show">No Show</option>
+                      <option value="rescheduled">Rescheduled</option>
+                      <option value="canceled">Canceled</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGetEmailsByStatus}
+                    disabled={fetchingEmails}
+                    className="mt-6 px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg font-semibold hover:from-orange-600 hover:to-orange-700 transition-all transform hover:scale-[1.02] shadow-md hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed text-sm flex items-center gap-2"
+                  >
+                    {fetchingEmails ? (
+                      <>
+                        <Loader className="animate-spin" size={16} />
+                        Fetching...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw size={16} />
+                        Get Emails
+                      </>
+                    )}
+                  </button>
+                </div>
+
                 <textarea
                   id="emailIds"
                   value={emailIds}
@@ -911,6 +1001,7 @@ export default function EmailCampaign({ prefill, onPrefillConsumed }: EmailCampa
                                       Resend Failed Emails
                                     </>
                                   )}
+                                  
                                 </button>
                               </div>
                             )}
