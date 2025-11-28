@@ -4,14 +4,13 @@ import {
   Loader,
   CheckCircle2,
   AlertTriangle,
-  XCircle,
   ChevronDown,
   ChevronUp,
-  RotateCw,
   RefreshCw,
   Clock,
   MessageSquare,
   Smartphone,
+  Play,
 } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.flashfirejobs.com';
@@ -68,7 +67,6 @@ export default function WhatsAppCampaign() {
   const [param1, setParam1] = useState('https://flashfirejobs.com/pricing');
   const [param2, setParam2] = useState('https://flashfirejobs.com/pricing');
   const [loading, setLoading] = useState(false);
-  const [loadingMobiles, setLoadingMobiles] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const [templates, setTemplates] = useState<WatiTemplate[]>([]);
@@ -84,6 +82,7 @@ export default function WhatsAppCampaign() {
   const [activeTab, setActiveTab] = useState<'create' | 'scheduled' | 'history'>('create');
   const [selectedBookingStatus, setSelectedBookingStatus] = useState<string>('scheduled');
   const [fetchingMobiles, setFetchingMobiles] = useState(false);
+  const [sendingCampaign, setSendingCampaign] = useState<string | null>(null);
 
   useEffect(() => {
     fetchTemplates();
@@ -197,6 +196,42 @@ export default function WhatsAppCampaign() {
       setError('Failed to fetch mobile numbers. Please try again.');
     } finally {
       setFetchingMobiles(false);
+    }
+  };
+
+  const handleSendNow = async (campaignId: string) => {
+    if (!confirm('Are you sure you want to send this campaign now? This will send messages to all pending recipients.')) {
+      return;
+    }
+
+    setSendingCampaign(campaignId);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/whatsapp-campaigns/${campaignId}/send-now`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert('Campaign messages are being sent! Check back in a few minutes.');
+        fetchScheduledCampaigns(true);
+        fetchCampaigns(1, true);
+      } else {
+        alert(`Failed to send campaign: ${data.message || 'Unknown error'}`);
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to send campaign';
+      alert(`Error: ${errorMessage}`);
+      console.error('Send campaign error:', err);
+    } finally {
+      setSendingCampaign(null);
     }
   };
 
@@ -573,7 +608,7 @@ export default function WhatsAppCampaign() {
                 Scheduled Campaigns ({scheduledCampaigns.length})
               </h2>
               <button
-                onClick={fetchScheduledCampaigns}
+                onClick={() => fetchScheduledCampaigns(true)}
                 disabled={loadingScheduled}
                 className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-all flex items-center gap-2 text-sm font-semibold"
               >
@@ -615,6 +650,29 @@ export default function WhatsAppCampaign() {
                           <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(campaign.status)}`}>
                             {campaign.status}
                           </span>
+                          
+                          {/* Send Now Button - Only show if campaign has pending messages */}
+                          {(campaign.status === 'SCHEDULED' || campaign.status === 'IN_PROGRESS' || campaign.status === 'PARTIAL') && 
+                           (campaign.totalRecipients - campaign.successCount - campaign.failedCount) > 0 && (
+                            <button
+                              onClick={() => handleSendNow(campaign.campaignId)}
+                              disabled={sendingCampaign === campaign.campaignId}
+                              className="px-3 py-1.5 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg text-xs font-semibold hover:from-green-600 hover:to-green-700 transition-all flex items-center gap-1.5 shadow-md hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                              {sendingCampaign === campaign.campaignId ? (
+                                <>
+                                  <Loader className="animate-spin" size={14} />
+                                  Sending...
+                                </>
+                              ) : (
+                                <>
+                                  <Play size={14} />
+                                  Send Now
+                                </>
+                              )}
+                            </button>
+                          )}
+                          
                           <button
                             onClick={() => setExpandedScheduled(expandedScheduled === campaign.campaignId ? null : campaign.campaignId)}
                             className="text-green-600 hover:text-green-700 transition-colors flex items-center gap-1 text-sm font-semibold"
