@@ -2,19 +2,20 @@ import { useState, type ComponentType } from 'react';
 import './App.css';
 import ProtectedCampaignManager from './components/ProtectedCampaignManager';
 import ProtectedEmailCampaign from './components/ProtectedEmailCampaign';
+import ProtectedWhatsAppCampaign from './components/ProtectedWhatsAppCampaign';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import UnifiedDataView from './components/UnifiedDataView';
 import { LayoutDashboard, Mail, MessageCircle, BarChart3, Megaphone, BarChart4, Database, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { EmailPrefillPayload } from './types/emailPrefill';
 
-type Tab = 'campaigns' | 'emails' | 'analytics' | 'data';
+type Tab = 'campaigns' | 'emails' | 'whatsapp' | 'analytics' | 'data';
 
 const navItems: Array<{ icon: ComponentType<{ size?: number }>; label: string; tab?: Tab }> = [
   { icon: LayoutDashboard, label: 'Campaign Manager', tab: 'campaigns' },
   { icon: Mail, label: 'Email Campaigns', tab: 'emails' },
+  { icon: MessageCircle, label: 'WhatsApp Campaigns', tab: 'whatsapp' },
   { icon: BarChart3, label: 'Analytics', tab: 'analytics' },
   { icon: Database, label: 'All Data', tab: 'data' },
-  { icon: MessageCircle, label: 'WhatsApp' },
 ];
 
 function App() {
@@ -158,6 +159,7 @@ function App() {
                 onPrefillConsumed={() => setEmailPrefill(null)}
               />
             )}
+            {activeTab === 'whatsapp' && <ProtectedWhatsAppCampaign />}
             {activeTab === 'analytics' && <AnalyticsDashboard onOpenEmailCampaign={handleOpenEmailCampaign} />}
             {activeTab === 'data' && <UnifiedDataView onOpenEmailCampaign={handleOpenEmailCampaign} />}
           </div>

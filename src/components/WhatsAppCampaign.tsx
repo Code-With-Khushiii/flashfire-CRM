@@ -1,0 +1,828 @@
+import { useState, useEffect } from 'react';
+import {
+  Send,
+  Loader,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  ChevronDown,
+  ChevronUp,
+  RotateCw,
+  RefreshCw,
+  Clock,
+  MessageSquare,
+  Smartphone,
+} from 'lucide-react';
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.flashfirejobs.com';
+
+interface WatiTemplate {
+  name: string;
+  id: string;
+  status: string;
+  category?: string;
+  language?: string;
+}
+
+interface WhatsAppCampaign {
+  _id: string;
+  campaignId: string;
+  templateName: string;
+  templateId: string | null;
+  mobileNumbers: string[];
+  parameters: string[];
+  totalRecipients: number;
+  successCount: number;
+  failedCount: number;
+  status: 'PENDING' | 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'PARTIAL' | 'FAILED';
+  createdAt: string;
+  completedAt?: string;
+  messageStatuses: Array<{
+    mobileNumber: string;
+    status: 'pending' | 'scheduled' | 'sent' | 'failed';
+    sentAt?: string;
+    scheduledSendDate?: string;
+    sendDay?: number;
+    errorMessage?: string;
+  }>;
+  isScheduled: boolean;
+  successfulMessages?: number;
+  failedMessages?: number;
+  pendingMessages?: number;
+}
+
+interface ScheduledWhatsAppCampaign extends WhatsAppCampaign {
+  sendSchedule: Array<{
+    day: number;
+    scheduledDate: string;
+    sent: number;
+    pending: number;
+    failed: number;
+  }>;
+}
+
+export default function WhatsAppCampaign() {
+  const [templateName, setTemplateName] = useState('');
+  const [templateId, setTemplateId] = useState('');
+  const [mobileNumbers, setMobileNumbers] = useState('');
+  const [param1, setParam1] = useState('https://flashfirejobs.com/pricing');
+  const [param2, setParam2] = useState('https://flashfirejobs.com/pricing');
+  const [loading, setLoading] = useState(false);
+  const [loadingMobiles, setLoadingMobiles] = useState(false);
+  const [success, setSuccess] = useState('');
+  const [error, setError] = useState('');
+  const [templates, setTemplates] = useState<WatiTemplate[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [campaigns, setCampaigns] = useState<WhatsAppCampaign[]>([]);
+  const [scheduledCampaigns, setScheduledCampaigns] = useState<ScheduledWhatsAppCampaign[]>([]);
+  const [loadingCampaigns, setLoadingCampaigns] = useState(false);
+  const [loadingScheduled, setLoadingScheduled] = useState(false);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [expandedCampaign, setExpandedCampaign] = useState<string | null>(null);
+  const [expandedScheduled, setExpandedScheduled] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'create' | 'scheduled' | 'history'>('create');
+  const [selectedBookingStatus, setSelectedBookingStatus] = useState<string>('scheduled');
+  const [fetchingMobiles, setFetchingMobiles] = useState(false);
+
+  useEffect(() => {
+    fetchTemplates();
+    fetchCampaigns();
+    fetchScheduledCampaigns();
+    const interval = setInterval(() => {
+      fetchScheduledCampaigns();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const fetchTemplates = async () => {
+    setLoadingTemplates(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/whatsapp-campaigns/templates`);
+      const data = await response.json();
+
+      if (data.success) {
+        setTemplates(data.templates || []);
+        if (data.templates && data.templates.length > 0) {
+          setTemplateName(data.templates[0].name);
+          setTemplateId(data.templates[0].id);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching WATI templates:', err);
+    } finally {
+      setLoadingTemplates(false);
+    }
+  };
+
+  const fetchCampaigns = async (pageNum: number = 1, bustCache: boolean = false) => {
+    setLoadingCampaigns(true);
+    try {
+      const cacheBuster = bustCache ? `&_t=${Date.now()}` : '';
+      const response = await fetch(`${API_BASE_URL}/api/whatsapp-campaigns?page=${pageNum}&limit=50${cacheBuster}`);
+      
+      // Handle 304 Not Modified - use cached data
+      if (response.status === 304) {
+        setLoadingCampaigns(false);
+        return;
+      }
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          if (pageNum === 1) {
+            setCampaigns(data.data);
+          } else {
+            setCampaigns((prev) => [...prev, ...data.data]);
+          }
+          setHasMore(data.pagination?.hasMore || false);
+          setPage(pageNum);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching campaigns:', err);
+    } finally {
+      setLoadingCampaigns(false);
+    }
+  };
+
+  const fetchScheduledCampaigns = async (bustCache: boolean = false) => {
+    setLoadingScheduled(true);
+    try {
+      const cacheBuster = bustCache ? `?_t=${Date.now()}` : '';
+      const response = await fetch(`${API_BASE_URL}/api/whatsapp-campaigns/scheduled${cacheBuster}`);
+      
+      // Handle 304 Not Modified - use cached data
+      if (response.status === 304) {
+        setLoadingScheduled(false);
+        return;
+      }
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setScheduledCampaigns(data.data);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching scheduled campaigns:', err);
+    } finally {
+      setLoadingScheduled(false);
+    }
+  };
+
+  const handleLoadMore = () => {
+    fetchCampaigns(page + 1);
+  };
+
+  const handleGetMobilesByStatus = async (status: string) => {
+    setFetchingMobiles(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/whatsapp-campaigns/mobile-numbers?status=${status}`);
+      const data = await response.json();
+
+      if (data.success && Array.isArray(data.data) && data.data.length > 0) {
+        const mobilesString = data.data.join(', ');
+        setMobileNumbers(mobilesString);
+        setSuccess(`Found ${data.data.length} mobile numbers for status "${status}"`);
+      } else {
+        setError(`No mobile numbers found for status "${status}"`);
+        setMobileNumbers('');
+      }
+    } catch (err) {
+      console.error('Error fetching mobile numbers:', err);
+      setError('Failed to fetch mobile numbers. Please try again.');
+    } finally {
+      setFetchingMobiles(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      // Parse mobile numbers
+      const mobilesArray = mobileNumbers
+        .split(',')
+        .map((m) => m.trim())
+        .filter(Boolean);
+
+      if (mobilesArray.length === 0) {
+        setError('Please enter at least one mobile number');
+        return;
+      }
+
+      // Prepare parameters
+      const parameters = [];
+      if (param1) parameters.push(param1);
+      if (param2) parameters.push(param2);
+
+      const payload = {
+        templateName,
+        templateId,
+        mobileNumbers: mobilesArray,
+        parameters
+      };
+
+      console.log('Creating WhatsApp campaign:', payload);
+
+      const response = await fetch(`${API_BASE_URL}/api/whatsapp-campaigns`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('Campaign creation response:', data);
+
+      if (data.success) {
+        setSuccess(data.message || 'WhatsApp campaign created successfully!');
+        setMobileNumbers('');
+        setParam1('https://flashfirejobs.com/pricing');
+        setParam2('https://flashfirejobs.com/pricing');
+        
+        // Refresh campaigns in background (don't wait) with cache busting
+        setTimeout(() => {
+          fetchCampaigns(1, true); // true = bust cache
+          fetchScheduledCampaigns(true); // true = bust cache
+        }, 500);
+        
+        // Switch to appropriate tab
+        if (data.campaign?.status === 'SCHEDULED') {
+          setActiveTab('scheduled');
+        } else {
+          setActiveTab('history');
+        }
+      } else {
+        setError(data.message || 'Failed to create campaign');
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred while creating the campaign';
+      setError(errorMessage);
+      console.error('Campaign creation error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'COMPLETED':
+      case 'sent':
+        return 'bg-green-100 text-green-800';
+      case 'IN_PROGRESS':
+      case 'pending':
+        return 'bg-blue-100 text-blue-800';
+      case 'FAILED':
+      case 'failed':
+        return 'bg-red-100 text-red-800';
+      case 'PARTIAL':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'SCHEDULED':
+      case 'scheduled':
+        return 'bg-purple-100 text-purple-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-orange-50 to-slate-100 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="text-center mb-12">
+          <div className="flex items-center justify-center gap-3 mb-4">
+            <div className="bg-gradient-to-r from-green-500 to-green-600 p-3 rounded-2xl shadow-lg">
+              <MessageSquare className="text-white" size={32} />
+            </div>
+          </div>
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">WhatsApp Marketing</h1>
+          <p className="text-gray-600">Send WhatsApp messages using WATI templates</p>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex justify-center mb-8">
+          <div className="bg-white rounded-lg shadow-md p-1 inline-flex">
+            <button
+              onClick={() => setActiveTab('create')}
+              className={`px-6 py-2 rounded-md font-semibold transition-all ${
+                activeTab === 'create'
+                  ? 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-md'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Send Campaign
+            </button>
+            <button
+              onClick={() => setActiveTab('scheduled')}
+              className={`px-6 py-2 rounded-md font-semibold transition-all relative ${
+                activeTab === 'scheduled'
+                  ? 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-md'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              Scheduled
+              {scheduledCampaigns.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+                  {scheduledCampaigns.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`px-6 py-2 rounded-md font-semibold transition-all ${
+                activeTab === 'history'
+                  ? 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-md'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              History
+            </button>
+          </div>
+        </div>
+
+        {/* Create Campaign Tab */}
+        {activeTab === 'create' && (
+          <div className="bg-white rounded-2xl shadow-xl p-8 mb-8">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+              <span className="bg-gradient-to-r from-green-500 to-green-600 text-white rounded-full w-8 h-8 flex items-center justify-center text-sm">
+                1
+              </span>
+              Create New WhatsApp Campaign
+            </h2>
+
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label htmlFor="templateName" className="block text-sm font-semibold text-gray-700 mb-2">
+                    Template Name <span className="text-red-500">*</span>
+                  </label>
+                  {loadingTemplates ? (
+                    <div className="flex items-center gap-2 text-gray-500">
+                      <Loader className="animate-spin" size={16} />
+                      <span>Loading templates...</span>
+                    </div>
+                  ) : (
+                    <select
+                      id="templateName"
+                      value={templateName}
+                      onChange={(e) => {
+                        setTemplateName(e.target.value);
+                        const template = templates.find(t => t.name === e.target.value);
+                        setTemplateId(template?.id || '');
+                      }}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
+                      required
+                    >
+                      {templates.length === 0 ? (
+                        <option value="">No templates available</option>
+                      ) : (
+                        templates.map((template) => (
+                          <option key={template.id} value={template.name}>
+                            {template.name}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  )}
+                </div>
+
+                <div>
+                  <label htmlFor="templateId" className="block text-sm font-semibold text-gray-700 mb-2">
+                    Template ID <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="templateId"
+                    value={templateId}
+                    onChange={(e) => setTemplateId(e.target.value)}
+                    placeholder="Template ID (auto-filled)"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all bg-gray-50"
+                    readOnly
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="mobileNumbers" className="block text-sm font-semibold text-gray-700 mb-2">
+                  Mobile Numbers (Recipients)
+                </label>
+                
+                {/* Booking Status Filter */}
+                <div className="mb-3 flex items-center gap-3 bg-gradient-to-r from-green-50 to-purple-50 p-4 rounded-lg border border-green-200">
+                  <div className="flex-1">
+                    <label htmlFor="bookingStatus" className="block text-xs font-semibold text-gray-700 mb-2">
+                      Get Mobile Numbers by Booking Status
+                    </label>
+                    <select
+                      id="bookingStatus"
+                      value={selectedBookingStatus}
+                      onChange={async (e) => {
+                        setSelectedBookingStatus(e.target.value);
+                        await handleGetMobilesByStatus(e.target.value);
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all text-sm"
+                    >
+                      <option value="scheduled">Scheduled</option>
+                      <option value="completed">Completed</option>
+                      <option value="no-show">No Show</option>
+                      <option value="rescheduled">Rescheduled</option>
+                      <option value="canceled">Canceled</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleGetMobilesByStatus(selectedBookingStatus)}
+                    disabled={fetchingMobiles}
+                    className="mt-6 px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg font-semibold hover:from-green-600 hover:to-green-700 transition-all transform hover:scale-[1.02] shadow-md hover:shadow-lg disabled:opacity-60 disabled:cursor-not-allowed text-sm flex items-center gap-2"
+                  >
+                    {fetchingMobiles ? (
+                      <>
+                        <Loader className="animate-spin" size={16} />
+                        Fetching...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw size={16} />
+                        Get Mobiles
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <textarea
+                  id="mobileNumbers"
+                  value={mobileNumbers}
+                  onChange={(e) => setMobileNumbers(e.target.value)}
+                  placeholder="e.g., +919876543210, +919123456789, +919988776655"
+                  rows={6}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all resize-none"
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Separate multiple mobile numbers with commas. Include country code (e.g., +91 for India)
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label htmlFor="param1" className="block text-sm font-semibold text-gray-700 mb-2">
+                    Parameter 1 (for {'{{2}}'})
+                  </label>
+                  <input
+                    type="text"
+                    id="param1"
+                    value={param1}
+                    onChange={(e) => setParam1(e.target.value)}
+                    placeholder="https://flashfirejobs.com/pricing"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">This value will replace {'{{2}}'} in the template</p>
+                </div>
+
+                <div>
+                  <label htmlFor="param2" className="block text-sm font-semibold text-gray-700 mb-2">
+                    Parameter 2 (for {'{{3}}'})
+                  </label>
+                  <input
+                    type="text"
+                    id="param2"
+                    value={param2}
+                    onChange={(e) => setParam2(e.target.value)}
+                    placeholder="https://flashfirejobs.com/pricing"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent transition-all"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">This value will replace {'{{3}}'} in the template</p>
+                </div>
+              </div>
+
+              {(templateName.toLowerCase().includes('no show') || templateName.toLowerCase().includes('noshow')) ? (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                  <p className="text-sm text-green-800 font-medium mb-2">⚡ Immediate Send Mode:</p>
+                  <p className="text-sm text-green-700">
+                    This template will be sent <strong>immediately</strong> to all recipients. No scheduling will occur.
+                  </p>
+                </div>
+              ) : (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <p className="text-sm text-blue-800 font-medium mb-2">📅 Scheduled Send Times:</p>
+                  <ul className="text-sm text-blue-700 space-y-1">
+                    <li><strong>Day 0:</strong> Immediately (within a few seconds)</li>
+                    <li><strong>Day 1:</strong> Tomorrow at 10:00 AM IST</li>
+                    <li><strong>Day 2:</strong> Day after tomorrow at 10:00 AM IST</li>
+                  </ul>
+                  <p className="text-sm text-blue-600 mt-2 italic">
+                    Note: If a user books a call, they will not receive follow-up messages.
+                  </p>
+                </div>
+              )}
+
+              {success && (
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center gap-3">
+                  <CheckCircle2 className="text-green-600 flex-shrink-0" size={20} />
+                  <p className="text-green-700 text-sm font-medium">{success}</p>
+                </div>
+              )}
+
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
+                  <AlertTriangle className="text-red-600 flex-shrink-0" size={20} />
+                  <p className="text-red-700 text-sm font-medium">{error}</p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading || loadingTemplates || templates.length === 0}
+                className="w-full py-4 px-6 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg font-bold text-lg hover:from-green-600 hover:to-green-700 transition-all transform hover:scale-[1.02] shadow-lg hover:shadow-xl disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {loading ? (
+                  <>
+                    <Loader className="animate-spin" size={20} />
+                    Creating Campaign...
+                  </>
+                ) : (
+                  <>
+                    <Send size={20} />
+                    Create WhatsApp Campaign
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* Scheduled Campaigns Tab */}
+        {activeTab === 'scheduled' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <Clock className="text-green-500" size={28} />
+                Scheduled Campaigns ({scheduledCampaigns.length})
+              </h2>
+              <button
+                onClick={fetchScheduledCampaigns}
+                disabled={loadingScheduled}
+                className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-all flex items-center gap-2 text-sm font-semibold"
+              >
+                <RefreshCw className={loadingScheduled ? 'animate-spin' : ''} size={16} />
+                Refresh
+              </button>
+            </div>
+
+            {loadingScheduled && scheduledCampaigns.length === 0 ? (
+              <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
+                <Loader className="animate-spin text-green-500 mx-auto mb-4" size={32} />
+                <p className="text-gray-600">Loading scheduled campaigns...</p>
+              </div>
+            ) : scheduledCampaigns.length === 0 ? (
+              <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
+                <Clock className="text-gray-400 mx-auto mb-4" size={48} />
+                <p className="text-gray-600 text-lg">No scheduled campaigns found</p>
+                <p className="text-gray-500 text-sm mt-2">Create a new campaign to get started!</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {scheduledCampaigns.map((campaign) => (
+                  <div key={campaign._id} className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+                    <div className="p-6">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex-1">
+                          <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+                            <MessageSquare className="text-green-500" size={20} />
+                            {campaign.templateName}
+                          </h3>
+                          <p className="text-sm text-gray-600 mb-2">
+                            <strong>Campaign ID:</strong> {campaign.campaignId}
+                          </p>
+                          <p className="text-sm text-gray-600">
+                            <strong>Total Recipients:</strong> {campaign.totalRecipients} mobiles
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(campaign.status)}`}>
+                            {campaign.status}
+                          </span>
+                          <button
+                            onClick={() => setExpandedScheduled(expandedScheduled === campaign.campaignId ? null : campaign.campaignId)}
+                            className="text-green-600 hover:text-green-700 transition-colors flex items-center gap-1 text-sm font-semibold"
+                          >
+                            {expandedScheduled === campaign.campaignId ? (
+                              <>
+                                <ChevronUp size={16} />
+                                Hide Details
+                              </>
+                            ) : (
+                              <>
+                                <ChevronDown size={16} />
+                                Show Details
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-4 mb-4">
+                        <div className="bg-green-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-600 mb-1">Success</p>
+                          <p className="text-2xl font-bold text-green-600">{campaign.successCount}</p>
+                        </div>
+                        <div className="bg-red-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-600 mb-1">Failed</p>
+                          <p className="text-2xl font-bold text-red-600">{campaign.failedCount}</p>
+                        </div>
+                        <div className="bg-blue-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-600 mb-1">Pending</p>
+                          <p className="text-2xl font-bold text-blue-600">
+                            {campaign.totalRecipients - campaign.successCount - campaign.failedCount}
+                          </p>
+                        </div>
+                      </div>
+
+                      {expandedScheduled === campaign.campaignId && campaign.sendSchedule && (
+                        <div className="mt-6 border-t border-gray-200 pt-6">
+                          <h4 className="text-lg font-bold text-gray-900 mb-4">Send Schedule</h4>
+                          <div className="space-y-3">
+                            {campaign.sendSchedule.map((schedule) => (
+                              <div key={schedule.day} className="bg-gray-50 rounded-lg p-4">
+                                <div className="flex items-center justify-between mb-2">
+                                  <span className="font-semibold text-gray-900">
+                                    Day {schedule.day} - {new Date(schedule.scheduledDate).toLocaleString()}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-4 text-sm">
+                                  <span className="text-green-600">✓ Sent: {schedule.sent}</span>
+                                  <span className="text-blue-600">⏳ Pending: {schedule.pending}</span>
+                                  <span className="text-red-600">✗ Failed: {schedule.failed}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* History Tab */}
+        {activeTab === 'history' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">Campaign History</h2>
+              <button
+                onClick={() => fetchCampaigns(1)}
+                disabled={loadingCampaigns}
+                className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-all flex items-center gap-2 text-sm font-semibold"
+              >
+                <RefreshCw className={loadingCampaigns ? 'animate-spin' : ''} size={16} />
+                Refresh
+              </button>
+            </div>
+
+            {loadingCampaigns && campaigns.length === 0 ? (
+              <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
+                <Loader className="animate-spin text-green-500 mx-auto mb-4" size={32} />
+                <p className="text-gray-600">Loading campaigns...</p>
+              </div>
+            ) : campaigns.length === 0 ? (
+              <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
+                <MessageSquare className="text-gray-400 mx-auto mb-4" size={48} />
+                <p className="text-gray-600 text-lg">No campaigns found</p>
+                <p className="text-gray-500 text-sm mt-2">Create your first WhatsApp campaign!</p>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-4">
+                  {campaigns.map((campaign) => (
+                    <div key={campaign._id} className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
+                      <div className="p-6">
+                        <div className="flex items-start justify-between mb-4">
+                          <div className="flex-1">
+                            <h3 className="text-xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+                              <MessageSquare className="text-green-500" size={20} />
+                              {campaign.templateName}
+                            </h3>
+                            <div className="text-sm text-gray-600 space-y-1">
+                              <p><strong>Campaign ID:</strong> {campaign.campaignId}</p>
+                              <p><strong>Total Recipients:</strong> {campaign.totalRecipients}</p>
+                              <p><strong>Created:</strong> {new Date(campaign.createdAt).toLocaleString()}</p>
+                              {campaign.completedAt && (
+                                <p><strong>Completed:</strong> {new Date(campaign.completedAt).toLocaleString()}</p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-2">
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(campaign.status)}`}>
+                              {campaign.status}
+                            </span>
+                            <button
+                              onClick={() => setExpandedCampaign(expandedCampaign === campaign.campaignId ? null : campaign.campaignId)}
+                              className="text-green-600 hover:text-green-700 transition-colors flex items-center gap-1 text-sm font-semibold"
+                            >
+                              {expandedCampaign === campaign.campaignId ? (
+                                <>
+                                  <ChevronUp size={16} />
+                                  Hide
+                                </>
+                              ) : (
+                                <>
+                                  <ChevronDown size={16} />
+                                  View
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-4">
+                          <div className="bg-green-50 rounded-lg p-3">
+                            <p className="text-xs text-gray-600 mb-1">Successful</p>
+                            <p className="text-2xl font-bold text-green-600">{campaign.successCount || 0}</p>
+                          </div>
+                          <div className="bg-red-50 rounded-lg p-3">
+                            <p className="text-xs text-gray-600 mb-1">Failed</p>
+                            <p className="text-2xl font-bold text-red-600">{campaign.failedCount || 0}</p>
+                          </div>
+                          <div className="bg-blue-50 rounded-lg p-3">
+                            <p className="text-xs text-gray-600 mb-1">Pending</p>
+                            <p className="text-2xl font-bold text-blue-600">
+                              {campaign.totalRecipients - (campaign.successCount || 0) - (campaign.failedCount || 0)}
+                            </p>
+                          </div>
+                        </div>
+
+                        {expandedCampaign === campaign.campaignId && campaign.messageStatuses && (
+                          <div className="mt-6 border-t border-gray-200 pt-6">
+                            <h4 className="text-lg font-bold text-gray-900 mb-4">Message Details</h4>
+                            <div className="max-h-96 overflow-y-auto">
+                              <div className="space-y-2">
+                                {campaign.messageStatuses.map((msg, idx) => (
+                                  <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                    <div className="flex items-center gap-3">
+                                      <Smartphone size={16} className="text-gray-400" />
+                                      <span className="text-sm font-medium text-gray-900">{msg.mobileNumber}</span>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                      {msg.sentAt && (
+                                        <span className="text-xs text-gray-500">
+                                          {new Date(msg.sentAt).toLocaleString()}
+                                        </span>
+                                      )}
+                                      <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusColor(msg.status)}`}>
+                                        {msg.status}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {hasMore && (
+                  <div className="flex justify-center mt-8">
+                    <button
+                      onClick={handleLoadMore}
+                      disabled={loadingCampaigns}
+                      className="px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg font-semibold hover:from-green-600 hover:to-green-700 transition-all transform hover:scale-[1.02] shadow-md hover:shadow-lg disabled:opacity-60 flex items-center gap-2"
+                    >
+                      {loadingCampaigns ? (
+                        <>
+                          <Loader className="animate-spin" size={18} />
+                          Loading...
+                        </>
+                      ) : (
+                        'Load More'
+                      )}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
