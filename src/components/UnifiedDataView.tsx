@@ -524,6 +524,43 @@ export default function UnifiedDataView({ onOpenEmailCampaign, onOpenWhatsAppCam
     });
   }, [selectedRows, filteredData, onOpenWhatsAppCampaign]);
 
+  const openEmailFollowUp = useCallback(
+    (email: string | undefined, reason: string) => {
+      if (!email) {
+        alert('Missing email address');
+        return;
+      }
+      onOpenEmailCampaign({
+        recipients: [email],
+        reason,
+      });
+    },
+    [onOpenEmailCampaign]
+  );
+
+  const openWhatsAppFollowUp = useCallback(
+    (phoneRaw: string | undefined, reason: string) => {
+      if (!onOpenWhatsAppCampaign) {
+        alert('WhatsApp campaign feature is not available');
+        return;
+      }
+      if (!phoneRaw || phoneRaw === 'Not Specified') {
+        alert('Missing phone number');
+        return;
+      }
+      const phone = phoneRaw.replace(/[^\d+]/g, '');
+      if (!phone) {
+        alert('Invalid phone number');
+        return;
+      }
+      onOpenWhatsAppCampaign({
+        mobileNumbers: [phone],
+        reason,
+      });
+    },
+    [onOpenWhatsAppCampaign]
+  );
+
   const handleUserCampaignsClick = useCallback(async (userEmail: string) => {
     setSelectedUserEmail(userEmail);
     setLoadingUserCampaigns(true);
@@ -1448,6 +1485,34 @@ export default function UnifiedDataView({ onOpenEmailCampaign, onOpenWhatsAppCam
                         </button>
                         {isBooking && row.bookingId ? (
                             <div className="flex flex-col gap-2">
+                              {/* Follow-ups */}
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const booking = bookingsById.get(row.bookingId!);
+                                    openEmailFollowUp(booking?.clientEmail || row.email, 'booking_followup');
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-orange-500 text-white hover:bg-orange-600 transition flex-1 justify-center whitespace-nowrap"
+                                >
+                                  <Mail size={14} />
+                                  Follow up
+                                </button>
+                                {onOpenWhatsAppCampaign ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const booking = bookingsById.get(row.bookingId!);
+                                      openWhatsAppFollowUp(booking?.clientPhone || row.phone, 'booking_followup');
+                                    }}
+                                    disabled={!row.phone || row.phone === 'Not Specified'}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-green-500 text-white hover:bg-green-600 transition disabled:opacity-60 disabled:cursor-not-allowed flex-1 justify-center whitespace-nowrap"
+                                  >
+                                    <MessageCircle size={14} />
+                                    WhatsApp
+                                  </button>
+                                ) : null}
+                              </div>
                               {/* Row 1: Join and Completed */}
                               <div className="flex items-center gap-2">
                                 {row.meetLink && (
@@ -1504,10 +1569,7 @@ export default function UnifiedDataView({ onOpenEmailCampaign, onOpenWhatsAppCam
                                       onClick={() => {
                                         const booking = bookingsById.get(row.bookingId!);
                                         if (booking && booking.clientEmail) {
-                                          onOpenEmailCampaign({
-                                            recipients: [booking.clientEmail],
-                                            reason: 'no_show_followup',
-                                          });
+                                          openEmailFollowUp(booking.clientEmail, 'no_show_followup');
                                         }
                                       }}
                                       className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-white border border-blue-300 text-blue-600 hover:bg-blue-50 transition flex-1 justify-center whitespace-nowrap"
