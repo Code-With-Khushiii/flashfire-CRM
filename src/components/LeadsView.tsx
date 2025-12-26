@@ -295,11 +295,6 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
     return map;
   }, [bookings]);
 
-  const getPlanOptionByName = (name?: string | null) => {
-    if (!name) return undefined;
-    return PLAN_OPTIONS.find((p) => p.key === name) || undefined;
-  };
-
   const handleStatusUpdate = async (bookingId: string, status: BookingStatus, plan?: PlanOption) => {
     try {
       setUpdatingBookingId(bookingId);
@@ -610,7 +605,6 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
                   const scheduledDate = row.scheduledTime
                     ? format(parseISO(row.scheduledTime), 'MMM d, yyyy • h:mm a')
                     : 'Not scheduled';
-                  const createdDate = format(parseISO(row.createdAt), 'MMM d, yyyy • h:mm a');
                   const isSelected = selectedRows.has(row.id);
 
                   return (
@@ -945,8 +939,8 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
             setIsNotesModalOpen(false);
             setSelectedBookingForNotes(null);
           }}
-          bookingName={selectedBookingForNotes.name}
-          notes={selectedBookingForNotes.notes}
+          clientName={selectedBookingForNotes.name}
+          initialNotes={selectedBookingForNotes.notes}
           onSave={handleSaveNotes}
         />
       )}
