@@ -19,6 +19,8 @@ import {
   X,
   Calendar,
   ChevronDown,
+  AlertCircle,
+  Info,
 } from 'lucide-react';
 import {
   format,
@@ -113,6 +115,15 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
   const [planBreakdown, setPlanBreakdown] = useState<Array<{ _id: string; count: number; revenue: number }>>([]);
   const [isNotesModalOpen, setIsNotesModalOpen] = useState(false);
   const [selectedBookingForNotes, setSelectedBookingForNotes] = useState<{ id: string; name: string; notes: string } | null>(null);
+  const [toasts, setToasts] = useState<Array<{ id: string; message: string; type: 'success' | 'error' | 'info' }>>([]);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Date.now().toString();
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
 
   const fetchLeads = useCallback(async (page: number = 1) => {
     try {
@@ -189,23 +200,31 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
   }, [bookings]);
 
   const filteredData = useMemo(() => {
-    return bookings.map((booking) => ({
-      id: `lead-${booking.clientEmail}`,
-      type: 'lead' as const,
-      name: booking.clientName || 'Unknown',
-      email: booking.clientEmail,
-      phone: booking.clientPhone,
-      createdAt: booking.bookingCreatedAt,
-      scheduledTime: booking.scheduledEventStartTime,
-      source: booking.utmSource || 'direct',
-      status: booking.bookingStatus,
-      meetLink: booking.calendlyMeetLink && booking.calendlyMeetLink !== 'Not Provided' ? booking.calendlyMeetLink : undefined,
-      notes: booking.anythingToKnow,
-      meetingNotes: booking.meetingNotes,
-      paymentPlan: booking.paymentPlan,
-      bookingId: booking.bookingId,
-      totalBookings: booking.totalBookings || 1,
-    })).filter((row) => {
+    return bookings.map((booking) => {
+      // Use phone number for ID if available, otherwise use email
+      // This ensures proper grouping when phone numbers are normalized
+      const idKey = booking.clientPhone && booking.clientPhone !== 'Not Specified' 
+        ? booking.clientPhone.replace(/\D/g, '').slice(-10) // Last 10 digits for matching
+        : booking.clientEmail;
+      
+      return {
+        id: `lead-${idKey}`,
+        type: 'lead' as const,
+        name: booking.clientName || 'Unknown',
+        email: booking.clientEmail,
+        phone: booking.clientPhone,
+        createdAt: booking.bookingCreatedAt,
+        scheduledTime: booking.scheduledEventStartTime,
+        source: booking.utmSource || 'direct',
+        status: booking.bookingStatus,
+        meetLink: booking.calendlyMeetLink && booking.calendlyMeetLink !== 'Not Provided' ? booking.calendlyMeetLink : undefined,
+        notes: booking.anythingToKnow,
+        meetingNotes: booking.meetingNotes,
+        paymentPlan: booking.paymentPlan,
+        bookingId: booking.bookingId,
+        totalBookings: booking.totalBookings || 1,
+      };
+    }).filter((row) => {
       if (row.name === 'Unknown Client' && row.email.includes('calendly.placeholder')) {
         return false;
       }
@@ -325,10 +344,18 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
       if (!data.success) {
         throw new Error(data.message || 'Failed to update booking status');
       }
+      
+      // Show toast notification if workflow was triggered
+      if (data.workflowTriggered) {
+        showToast(`Workflow triggered for ${status} action`, 'success');
+      } else {
+        showToast(`Status updated to ${status}`, 'success');
+      }
+      
       await fetchLeads(bookingsPage);
     } catch (err) {
       console.error(err);
-      alert(err instanceof Error ? err.message : 'Failed to update booking status');
+      showToast(err instanceof Error ? err.message : 'Failed to update booking status', 'error');
     } finally {
       setUpdatingBookingId(null);
       setPlanPickerFor(null);
@@ -901,11 +928,14 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
             </table>
           </div>
         </div>
-        {bookingsPagination.pages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 bg-slate-50">
-            <div className="text-sm text-slate-600">
-              Page {bookingsPagination.page} of {bookingsPagination.pages} ({bookingsPagination.total} lead{bookingsPagination.total !== 1 ? 's' : ''})
-            </div>
+        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 bg-slate-50">
+          <div className="text-sm text-slate-600">
+            {bookingsPagination.pages > 1 ? (
+              <>Page {bookingsPagination.page} of {bookingsPagination.pages} • </>
+            ) : null}
+            Total unique leads: <span className="font-semibold text-slate-900">{bookingsPagination.total}</span>
+          </div>
+          {bookingsPagination.pages > 1 && (
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
@@ -934,8 +964,8 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
                 <ChevronRight size={16} />
               </button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {isNotesModalOpen && selectedBookingForNotes && (
@@ -950,6 +980,33 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
           onSave={handleSaveNotes}
         />
       )}
+
+      {/* Toast Notifications */}
+      <div className="fixed top-4 right-4 z-50 space-y-2">
+        {toasts.map((toast) => (
+          <div
+            key={toast.id}
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-white min-w-[300px] animate-in slide-in-from-right ${
+              toast.type === 'success'
+                ? 'bg-green-500'
+                : toast.type === 'error'
+                ? 'bg-red-500'
+                : 'bg-blue-500'
+            }`}
+          >
+            {toast.type === 'success' && <CheckCircle2 size={20} />}
+            {toast.type === 'error' && <AlertCircle size={20} />}
+            {toast.type === 'info' && <Info size={20} />}
+            <span className="flex-1 font-medium">{toast.message}</span>
+            <button
+              onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+              className="ml-2 hover:opacity-80"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
