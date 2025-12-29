@@ -21,6 +21,7 @@ import {
   ChevronDown,
   AlertCircle,
   Info,
+  Trash2,
 } from 'lucide-react';
 import {
   format,
@@ -115,6 +116,9 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
   const [planBreakdown, setPlanBreakdown] = useState<Array<{ _id: string; count: number; revenue: number }>>([]);
   const [isNotesModalOpen, setIsNotesModalOpen] = useState(false);
   const [selectedBookingForNotes, setSelectedBookingForNotes] = useState<{ id: string; name: string; notes: string } | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [selectedLeadForDelete, setSelectedLeadForDelete] = useState<{ name: string; email: string; phone?: string } | null>(null);
+  const [deletingLead, setDeletingLead] = useState(false);
   const [toasts, setToasts] = useState<Array<{ id: string; message: string; type: 'success' | 'error' | 'info' }>>([]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -427,6 +431,42 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
       setSelectedBookingForNotes(null);
     } catch (err) {
       throw err;
+    }
+  };
+
+  const handleDeleteClick = (row: { name: string; email: string; phone?: string }) => {
+    setSelectedLeadForDelete({
+      name: row.name,
+      email: row.email,
+      phone: row.phone
+    });
+    setIsDeleteModalOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!selectedLeadForDelete) return;
+
+    setDeletingLead(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/users/delete/${encodeURIComponent(selectedLeadForDelete.email)}`, {
+        method: 'DELETE',
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        showToast(`Successfully deleted all records for ${selectedLeadForDelete.name}`, 'success');
+        await fetchLeads(bookingsPage);
+        setIsDeleteModalOpen(false);
+        setSelectedLeadForDelete(null);
+      } else {
+        showToast(data.message || 'Failed to delete lead records', 'error');
+      }
+    } catch (err) {
+      console.error('Error deleting lead records:', err);
+      showToast('Failed to delete lead records. Please try again.', 'error');
+    } finally {
+      setDeletingLead(false);
     }
   };
 
@@ -902,6 +942,13 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
                               </button>
                             )}
                           </div>
+                          <button
+                            onClick={() => handleDeleteClick(row)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold bg-red-500 text-white hover:bg-red-600 transition w-full justify-center whitespace-nowrap mt-1.5"
+                          >
+                            <Trash2 size={14} />
+                            Delete
+                          </button>
                         </div>
                         {row.notes && (
                           <div className="text-xs text-slate-500 bg-slate-100 rounded-lg px-2 py-1.5 border border-slate-200 mt-1.5">
@@ -928,13 +975,13 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
             </table>
           </div>
         </div>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 bg-slate-50">
-          <div className="text-sm text-slate-600">
+          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 bg-slate-50">
+            <div className="text-sm text-slate-600">
             {bookingsPagination.pages > 1 ? (
               <>Page {bookingsPagination.page} of {bookingsPagination.pages} • </>
             ) : null}
             Total unique leads: <span className="font-semibold text-slate-900">{bookingsPagination.total}</span>
-          </div>
+            </div>
           {bookingsPagination.pages > 1 && (
             <div className="flex items-center gap-2">
               <button
@@ -963,8 +1010,8 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
                 Next
                 <ChevronRight size={16} />
               </button>
-            </div>
-          )}
+          </div>
+        )}
         </div>
       </div>
 
@@ -979,6 +1026,76 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
           notes={selectedBookingForNotes.notes}
           onSave={handleSaveNotes}
         />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {isDeleteModalOpen && selectedLeadForDelete && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => !deletingLead && setIsDeleteModalOpen(false)}>
+          <div
+            className="bg-white rounded-2xl shadow-2xl max-w-md w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="bg-red-100 p-3 rounded-full">
+                  <AlertCircle className="text-red-600" size={24} />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900">Delete Lead Records</h3>
+              </div>
+              
+              <p className="text-slate-600 mb-6">
+                Are you sure you want to delete all entries of this user? This action cannot be undone.
+              </p>
+
+              <div className="bg-slate-50 rounded-lg p-4 mb-6 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-slate-700">Name:</span>
+                  <span className="text-sm text-slate-900">{selectedLeadForDelete.name}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-slate-700">Email:</span>
+                  <span className="text-sm text-slate-900">{selectedLeadForDelete.email}</span>
+                </div>
+                {selectedLeadForDelete.phone && selectedLeadForDelete.phone !== 'Not Specified' && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-slate-700">Mobile:</span>
+                    <span className="text-sm text-slate-900">{selectedLeadForDelete.phone}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    setIsDeleteModalOpen(false);
+                    setSelectedLeadForDelete(null);
+                  }}
+                  disabled={deletingLead}
+                  className="flex-1 px-4 py-2.5 border border-slate-300 rounded-lg text-slate-700 font-semibold hover:bg-slate-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmDelete}
+                  disabled={deletingLead}
+                  className="flex-1 px-4 py-2.5 bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {deletingLead ? (
+                    <>
+                      <Loader2 className="animate-spin" size={18} />
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={18} />
+                      Confirm Delete
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Toast Notifications */}

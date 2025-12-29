@@ -24,6 +24,9 @@ import {
   Type,
   List,
   Send,
+  Users,
+  Play,
+  Info,
 } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -104,7 +107,7 @@ interface WorkflowLog {
   createdAt: string;
 }
 
-type ActiveTab = 'workflows' | 'logs';
+type ActiveTab = 'workflows' | 'logs' | 'bulk';
 type LogStatus = 'scheduled' | 'executed' | 'all';
 
 export default function Workflows() {
@@ -144,16 +147,31 @@ export default function Workflows() {
     failed: 0,
   });
 
+  // Bulk actions state
+  const [selectedStatus, setSelectedStatus] = useState<string>('');
+  const [bookingsData, setBookingsData] = useState<any>(null);
+  const [loadingBookings, setLoadingBookings] = useState(false);
+  const [triggeringBulk, setTriggeringBulk] = useState(false);
+  const [bulkResult, setBulkResult] = useState<any>(null);
+
   useEffect(() => {
     if (activeTab === 'workflows') {
       fetchWorkflows();
       fetchWatiTemplates();
       fetchEmailTemplates();
-    } else {
+    } else if (activeTab === 'logs') {
       fetchLogs();
       fetchLogStats();
+    } else if (activeTab === 'bulk' && selectedStatus) {
+      fetchBookingsByStatus();
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab === 'bulk' && selectedStatus) {
+      fetchBookingsByStatus();
+    }
+  }, [selectedStatus]);
 
   useEffect(() => {
     if (activeTab === 'logs') {
@@ -524,6 +542,75 @@ export default function Workflows() {
     return colors[action] || 'bg-slate-100 text-slate-700';
   };
 
+  const fetchBookingsByStatus = async () => {
+    if (!selectedStatus) return;
+    
+    try {
+      setLoadingBookings(true);
+      const response = await fetch(`${API_BASE_URL}/api/workflows/bulk/bookings-by-status?status=${selectedStatus}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setBookingsData(data.data);
+      } else {
+        showToast(data.message || 'Failed to fetch bookings', 'error');
+      }
+    } catch (error) {
+      console.error('Error fetching bookings by status:', error);
+      showToast('Error fetching bookings', 'error');
+    } finally {
+      setLoadingBookings(false);
+    }
+  };
+
+  const handleTriggerBulkWorkflows = async () => {
+    if (!selectedStatus) {
+      showToast('Please select a status first', 'error');
+      return;
+    }
+
+    if (!confirm(`Are you sure you want to trigger workflows for all bookings with status "${selectedStatus}"? This will send workflows to ${bookingsData?.summary?.withoutScheduledWorkflows || 0} bookings that don't already have workflows scheduled.`)) {
+      return;
+    }
+
+    try {
+      setTriggeringBulk(true);
+      setBulkResult(null);
+      
+      const response = await fetch(`${API_BASE_URL}/api/workflows/bulk/trigger-by-status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          status: selectedStatus,
+          skipExisting: true
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setBulkResult(data.data);
+        showToast(`Successfully processed ${data.data.processed} bookings`, 'success');
+        // Refresh bookings data
+        await fetchBookingsByStatus();
+        // Refresh logs
+        if (activeTab === 'logs') {
+          fetchLogs();
+          fetchLogStats();
+        }
+      } else {
+        showToast(data.message || 'Failed to trigger workflows', 'error');
+      }
+    } catch (error) {
+      console.error('Error triggering bulk workflows:', error);
+      showToast('Error triggering workflows', 'error');
+    } finally {
+      setTriggeringBulk(false);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'scheduled':
@@ -615,6 +702,16 @@ export default function Workflows() {
               >
                 <FileText size={16} className="inline mr-2" />
                 Logs
+              </button>
+              <button
+                onClick={() => setActiveTab('bulk')}
+                className={`px-4 py-3 text-sm font-semibold border-b-2 transition ${activeTab === 'bulk'
+                    ? 'border-orange-500 text-orange-600'
+                    : 'border-transparent text-slate-600 hover:text-slate-900'
+                  }`}
+              >
+                <Users size={16} className="inline mr-2" />
+                Send to All
               </button>
             </div>
           </div>
@@ -1691,6 +1788,222 @@ export default function Workflows() {
                 )}
               </div>
             </div>
+          </>
+        )}
+
+        {/* Bulk Actions Tab Content */}
+        {activeTab === 'bulk' && (
+          <>
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+              <h2 className="text-xl font-semibold text-slate-900 mb-4">Send Workflows to All</h2>
+              <p className="text-slate-600 mb-6">
+                Manually trigger workflows for all bookings with a specific status. The system will automatically skip bookings that already have workflows scheduled.
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    Select Status <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={selectedStatus}
+                    onChange={(e) => {
+                      setSelectedStatus(e.target.value);
+                      setBookingsData(null);
+                      setBulkResult(null);
+                    }}
+                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent text-slate-700 bg-white"
+                  >
+                    <option value="">Select a status...</option>
+                    <option value="no-show">No Show</option>
+                    <option value="completed">Completed</option>
+                    <option value="canceled">Canceled</option>
+                    <option value="rescheduled">Rescheduled</option>
+                  </select>
+                </div>
+
+                {selectedStatus && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={fetchBookingsByStatus}
+                      disabled={loadingBookings}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition text-sm font-semibold disabled:opacity-60"
+                    >
+                      {loadingBookings ? (
+                        <>
+                          <Loader2 className="animate-spin" size={16} />
+                          Loading...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw size={16} />
+                          Check Bookings
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {bookingsData && (
+                  <div className="mt-6 space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-slate-50 rounded-lg border border-slate-200 p-4">
+                        <div className="text-sm text-slate-600 mb-1">Total Bookings</div>
+                        <div className="text-2xl font-bold text-slate-900">{bookingsData.summary.total}</div>
+                      </div>
+                      <div className="bg-blue-50 rounded-lg border border-blue-200 p-4">
+                        <div className="text-sm text-blue-600 mb-1">With Scheduled Workflows</div>
+                        <div className="text-2xl font-bold text-blue-700">{bookingsData.summary.withScheduledWorkflows}</div>
+                      </div>
+                      <div className="bg-green-50 rounded-lg border border-green-200 p-4">
+                        <div className="text-sm text-green-600 mb-1">Without Workflows</div>
+                        <div className="text-2xl font-bold text-green-700">{bookingsData.summary.withoutScheduledWorkflows}</div>
+                      </div>
+                    </div>
+
+                    {bookingsData.summary.withoutScheduledWorkflows > 0 && (
+                      <div className="flex items-center gap-2 pt-4 border-t border-slate-200">
+                        <button
+                          onClick={handleTriggerBulkWorkflows}
+                          disabled={triggeringBulk || bookingsData.summary.withoutScheduledWorkflows === 0}
+                          className="inline-flex items-center gap-2 px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {triggeringBulk ? (
+                            <>
+                              <Loader2 className="animate-spin" size={18} />
+                              Processing...
+                            </>
+                          ) : (
+                            <>
+                              <Play size={18} />
+                              Trigger Workflows for {bookingsData.summary.withoutScheduledWorkflows} Bookings
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+
+                    {bulkResult && (
+                      <div className={`mt-4 p-4 rounded-lg border ${
+                        bulkResult.errors && bulkResult.errors.length > 0
+                          ? 'bg-yellow-50 border-yellow-200'
+                          : 'bg-green-50 border-green-200'
+                      }`}>
+                        <div className="flex items-start gap-3">
+                          {bulkResult.errors && bulkResult.errors.length > 0 ? (
+                            <AlertCircle className="text-yellow-600 mt-0.5" size={20} />
+                          ) : (
+                            <CheckCircle2 className="text-green-600 mt-0.5" size={20} />
+                          )}
+                          <div className="flex-1">
+                            <div className="font-semibold text-slate-900 mb-2">Bulk Action Results</div>
+                            <div className="space-y-1 text-sm text-slate-700">
+                              <div>Total: {bulkResult.total}</div>
+                              <div className="text-green-700">Processed: {bulkResult.processed}</div>
+                              <div className="text-slate-600">Skipped: {bulkResult.skipped}</div>
+                              {bulkResult.errors && bulkResult.errors.length > 0 && (
+                                <div className="text-red-700 mt-2">
+                                  Errors: {bulkResult.errors.length}
+                                  <div className="mt-2 space-y-1">
+                                    {bulkResult.errors.slice(0, 5).map((error: any, idx: number) => (
+                                      <div key={idx} className="text-xs">
+                                        {error.clientEmail}: {error.error}
+                                      </div>
+                                    ))}
+                                    {bulkResult.errors.length > 5 && (
+                                      <div className="text-xs text-slate-500">
+                                        ... and {bulkResult.errors.length - 5} more errors
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {bookingsData.summary.withoutScheduledWorkflows === 0 && bookingsData.summary.total > 0 && (
+                      <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <div className="flex items-start gap-3">
+                          <Info className="text-blue-600 mt-0.5" size={20} />
+                          <div className="text-sm text-blue-800">
+                            All bookings with this status already have workflows scheduled. No action needed.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Bookings List */}
+            {bookingsData && bookingsData.bookings && bookingsData.bookings.length > 0 && (
+              <div className="bg-white rounded-xl shadow-sm border border-slate-200">
+                <div className="p-6 border-b border-slate-200">
+                  <h3 className="text-lg font-semibold text-slate-900">Bookings List</h3>
+                  <p className="text-sm text-slate-600 mt-1">
+                    Showing {bookingsData.bookings.length} booking{bookingsData.bookings.length !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Client</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Email</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Phone</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Status</th>
+                        <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Workflows</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {bookingsData.bookings.slice(0, 50).map((booking: any) => (
+                        <tr key={booking.bookingId} className="hover:bg-slate-50 transition">
+                          <td className="py-3 px-4">
+                            <div className="text-sm font-medium text-slate-900">
+                              {booking.clientName || 'Unknown'}
+                            </div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="text-sm text-slate-700">{booking.clientEmail}</div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <div className="text-sm text-slate-700">{booking.clientPhone || '—'}</div>
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`inline-flex px-2.5 py-1 rounded-lg text-xs font-semibold ${getActionColor(booking.bookingStatus)}`}>
+                              {getActionLabel(booking.bookingStatus === 'completed' ? 'complete' : 
+                                               booking.bookingStatus === 'canceled' ? 'cancel' :
+                                               booking.bookingStatus === 'rescheduled' ? 're-schedule' : 'no-show')}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {booking.hasScheduledWorkflows ? (
+                              <div className="flex items-center gap-2">
+                                <CheckCircle2 size={16} className="text-green-600" />
+                                <span className="text-sm text-green-700">
+                                  {booking.scheduledWorkflowsCount} scheduled
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-sm text-slate-400">None</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {bookingsData.bookings.length > 50 && (
+                    <div className="p-4 text-center text-sm text-slate-600 border-t border-slate-200">
+                      Showing first 50 of {bookingsData.bookings.length} bookings
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
