@@ -190,17 +190,15 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
       setRefreshing(false);
       setLoading(false);
     }
-  }, [planFilter, utmFilter, search, fromDate, toDate, minAmount, maxAmount]);
+  }, [planFilter, statusFilter, utmFilter, search, fromDate, toDate, minAmount, maxAmount]);
 
-  useEffect(() => {
-    fetchLeads(bookingsPage);
-  }, [fetchLeads]);
-
+  // Reset to page 1 and fetch when filters change
   useEffect(() => {
     const page = 1;
     setBookingsPage(page);
     fetchLeads(page);
-  }, [planFilter, utmFilter, statusFilter, search, fromDate, toDate, minAmount, maxAmount]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planFilter, statusFilter, utmFilter, search, fromDate, toDate, minAmount, maxAmount]);
 
   const uniqueSources = useMemo(() => {
     const sources = new Set<string>();
@@ -250,6 +248,64 @@ export default function LeadsView({ onOpenEmailCampaign, onOpenWhatsAppCampaign 
       return bDate.getTime() - aDate.getTime();
     });
   }, [bookings]);
+
+  // Calculate status statistics from filtered data (unique leads only)
+  const statusStats = useMemo(() => {
+    const stats = {
+      scheduled: 0,
+      completed: 0,
+      canceled: 0,
+      'no-show': 0,
+      rescheduled: 0,
+      ignored: 0,
+      paid: 0,
+    };
+
+    filteredData.forEach((lead) => {
+      if (lead.status && stats.hasOwnProperty(lead.status)) {
+        stats[lead.status as keyof typeof stats]++;
+      }
+    });
+
+    const total = filteredData.length;
+    const booked = stats.scheduled + stats.rescheduled; // Booked includes scheduled and rescheduled
+
+    return {
+      booked,
+      completed: stats.completed,
+      canceled: stats.canceled,
+      noShow: stats['no-show'],
+      rescheduled: stats.rescheduled,
+      ignored: stats.ignored,
+      paid: stats.paid,
+      total,
+    };
+  }, [filteredData]);
+
+  // Format date range for display
+  const dateRangeDisplay = useMemo(() => {
+    if (!fromDate && !toDate) return null;
+    
+    const formatDate = (dateStr: string) => {
+      if (!dateStr) return '';
+      try {
+        // Handle YYYY-MM-DD format from date inputs
+        const date = parseISO(dateStr + 'T00:00:00');
+        return format(date, 'MMMM d, yyyy');
+      } catch {
+        return dateStr;
+      }
+    };
+
+    if (fromDate && toDate) {
+      return `${formatDate(fromDate)} to ${formatDate(toDate)}`;
+    } else if (fromDate) {
+      return `From ${formatDate(fromDate)}`;
+    } else if (toDate) {
+      return `Until ${formatDate(toDate)}`;
+    }
+    return null;
+  }, [fromDate, toDate]);
 
   const handleSelectAll = useCallback(() => {
     if (selectedRows.size === filteredData.length) {
